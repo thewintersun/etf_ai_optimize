@@ -302,6 +302,7 @@ class JoinquantEPOConfig:
     max_weight: Optional[float] = None
     use_risk_target: bool = True
     target_vol_annual: float = 0.12
+    max_leverage: float = 1.5
 
 
 class JoinquantEPOStrategy(BaseStrategy):
@@ -339,6 +340,7 @@ class JoinquantEPOStrategy(BaseStrategy):
             max_weight=(None if params.get("max_weight", None) in (None, "", "None") else float(params.get("max_weight"))),
             use_risk_target=bool(params.get("use_risk_target", True)),
             target_vol_annual=float(params.get("target_vol_annual", 0.12)),
+            max_leverage=float(params.get("max_leverage", 1.5)),
         )
 
     def _fetch_close_matrix(self, start: str, end: str) -> pd.DataFrame:
@@ -491,6 +493,9 @@ class JoinquantEPOStrategy(BaseStrategy):
             port_vol_annual2 = port_vol_daily2 * np.sqrt(252)
             if port_vol_annual2 > 0 and np.isfinite(port_vol_annual2):
                 scale = float(self.cfg.target_vol_annual) / float(port_vol_annual2)
+                # 杠杆上限：避免极端情况下 scale 过大
+                if np.isfinite(scale) and scale > float(self.cfg.max_leverage):
+                    scale = float(self.cfg.max_leverage)
                 weights = weights * scale
                 scaled = True
 

@@ -58,8 +58,9 @@ PARAMS = {
     "max_weight": None,
 
     # --- 风险目标（杠杆）控制 ---
-    "use_risk_target": False,  # 是否启用风险目标缩放
-    "target_vol_annual": 0.12,  # 年化目标波动率
+    "use_risk_target": True,  # 是否启用风险目标缩放
+    "target_vol_annual": 0.14,  # 年化目标波动率（温和抬升收益的起步值）
+    "max_leverage": 1.3,  # 杠杆上限（权重总和的上限近似；用于 cap 风险目标缩放的 scale）
 
     # --- 回测资金与手续费 ---
     "initial_capital": 1_000_000.0,  # 初始资金（元）
