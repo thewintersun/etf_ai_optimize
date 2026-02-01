@@ -1,0 +1,34 @@
+agent:
+  mode: cursor_manual
+  iterations: 200
+  sleep_seconds: 60
+  backtest_cmd:
+    - python
+    - -m
+    - backtest.run_backtest
+  python_executable: python
+
+objectives:
+  target:
+    sharpe: 2.2
+    max_drawdown: 0.10
+  weights:
+    sharpe: 0.4
+    annual_return: 0.3
+    max_drawdown: -0.3
+    turnover: -0.1
+
+constraints:
+  params_range:
+    min: 0.1
+    max: 200
+  forbid_new_keys: true
+  forbidden_patterns:
+    - "shift(-"
+    - "future"
+    - "rolling(window=1)"
+
+paths:
+  strategy_params: strategy/strategy_params.py
+  metrics_out: metrics.json
+  runs_dir: runs

@@ -1,0 +1,10 @@
+{
+  "annual_return": 0.2775579944360991,
+  "max_drawdown": 0.06802579892506955,
+  "sharpe": 1.7288184935541868,
+  "calmar": 4.080187205766291,
+  "turnover": 13.22768452164304,
+  "equity_curve_png": "reports\\equity_curve_2025-01-01_2025-06-30.png",
+  "trades_report_csv": "reports\\trades_2025-01-01_2025-06-30_20260201_213554.csv",
+  "daily_positions_report_csv": "reports\\daily_positions_2025-01-01_2025-06-30_20260201_213554.csv"
+}

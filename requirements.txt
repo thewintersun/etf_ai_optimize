@@ -1,0 +1,9 @@
+numpy
+pandas
+pyyaml
+akshare
+baostock
+pytdx
+scipy
+scikit-learn
+arch
