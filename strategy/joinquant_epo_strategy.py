@@ -303,6 +303,11 @@ class JoinquantEPOConfig:
     use_risk_target: bool = True
     target_vol_annual: float = 0.12
     max_leverage: float = 1.5
+    signal_clip_quantile: float = 0.1
+    signal_tanh_scale: float = 1.0
+    signal_blend_alpha: float = 1.0
+    rebalance_min_delta: float = 0.0
+    rebalance_smoothing_beta: float = 1.0
 
 
 class JoinquantEPOStrategy(BaseStrategy):
@@ -341,6 +346,11 @@ class JoinquantEPOStrategy(BaseStrategy):
             use_risk_target=bool(params.get("use_risk_target", True)),
             target_vol_annual=float(params.get("target_vol_annual", 0.12)),
             max_leverage=float(params.get("max_leverage", 1.5)),
+            signal_clip_quantile=float(params.get("signal_clip_quantile", 0.1)),
+            signal_tanh_scale=float(params.get("signal_tanh_scale", 1.0)),
+            signal_blend_alpha=float(params.get("signal_blend_alpha", 1.0)),
+            rebalance_min_delta=float(params.get("rebalance_min_delta", 0.0)),
+            rebalance_smoothing_beta=float(params.get("rebalance_smoothing_beta", 1.0)),
         )
 
     def _fetch_close_matrix(self, start: str, end: str) -> pd.DataFrame:
@@ -430,16 +440,35 @@ class JoinquantEPOStrategy(BaseStrategy):
         port_vol_daily = float(np.sqrt(ew.T @ returns.cov().values @ ew))
         port_vol_annual = port_vol_daily * np.sqrt(252)
 
-        # 基础信号：均值/标准差（类似横截面 Sharpe，但这里直接用样本均值与样本 std）
-        signal_std = (returns.mean() / returns.std()).values
-        signal_std = np.where(np.isfinite(signal_std), signal_std, 0.0)
+        # 信号融合：横截面(mean/std) 与 时间序列(ts_sharpe)
+        cs_sig = (returns.mean() / returns.std()).values
+        cs_sig = np.where(np.isfinite(cs_sig), cs_sig, 0.0)
 
-        # 若信号全为 0，则退回到时间衰减 Sharpe 信号（与 joinquant_epo.py 中的备选方案一致）
+        ts_sig = ts_sharpe_signal(prices, span=int(self.cfg.signal_span))
+        ts_sig = np.where(np.isfinite(ts_sig), ts_sig, 0.0)
+
+        alpha = float(self.cfg.signal_blend_alpha)
+        alpha = float(np.clip(alpha, 0.0, 1.0))
+        signal_std = (alpha * cs_sig) + ((1.0 - alpha) * ts_sig)
+
+        # 若融合信号退化为 0，则回退到等权 0 信号（后续会被 clip/tanh 处理为 0）
         used_fallback_signal = False
         if float(np.abs(signal_std).sum()) == 0.0:
             used_fallback_signal = True
-            signal_std = ts_sharpe_signal(prices, span=int(self.cfg.signal_span))
-            # 用 tanh 压缩极端值，减少单一资产信号过大带来的不稳定
+
+        # 信号去极值（winsorize/clip by quantile）+ tanh 压缩
+        q = float(self.cfg.signal_clip_quantile)
+        q = float(np.clip(q, 0.0, 0.49)) # Ensure quantile is valid
+        if q > 0 and len(signal_std) > 1:
+            lo = float(np.nanquantile(signal_std, q))
+            hi = float(np.nanquantile(signal_std, 1.0 - q))
+            if np.isfinite(lo) and np.isfinite(hi) and hi > lo:
+                signal_std = np.clip(signal_std, lo, hi)
+
+        sscale = float(self.cfg.signal_tanh_scale)
+        if np.isfinite(sscale) and sscale > 0:
+            signal_std = np.tanh(signal_std / sscale)
+        else:
             signal_std = np.tanh(signal_std)
 
         # 计算动态 lambda，但根据配置决定是否使用
@@ -622,12 +651,28 @@ class JoinquantEPOStrategy(BaseStrategy):
             if not wdict:
                 # 若优化失败（数据不足等），当期权重全 0
                 logger.warning("rebalance optimization empty | dt=%s", dt.date().isoformat())
-                last_w = pd.Series(0.0, index=close_df.columns)
+                new_w = pd.Series(0.0, index=close_df.columns)
             else:
                 # 对齐到完整 ETF 列集合，未参与优化的资产权重填 0
-                last_w = pd.Series(wdict)
-                last_w = last_w.reindex(close_df.columns).fillna(0.0)
+                new_w = pd.Series(wdict)
+                new_w = new_w.reindex(close_df.columns).fillna(0.0)
 
+            # 调仓过滤：若新旧权重变化太小，则跳过本次调仓（沿用 last_w）
+            if last_w is not None:
+                min_delta = float(self.cfg.rebalance_min_delta)
+                min_delta = max(0.0, min_delta)
+                delta = float(np.abs(new_w.values - last_w.values).sum())
+                if delta < min_delta:
+                    new_w = last_w
+
+            # 权重平滑：w = (1-beta)*old + beta*new
+            if last_w is not None:
+                beta = float(self.cfg.rebalance_smoothing_beta)
+                beta = float(np.clip(beta, 0.0, 1.0))
+                if beta < 1.0:
+                    new_w = (1.0 - beta) * last_w + beta * new_w
+
+            last_w = new_w
             weights_df.iloc[i] = last_w.values
 
         logger.info(
